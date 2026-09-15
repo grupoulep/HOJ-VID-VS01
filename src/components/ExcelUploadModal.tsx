@@ -9,6 +9,9 @@ import {
   Users,
   Info,
   Loader2,
+  ShieldCheck,
+  Lock,
+  Key,
 } from 'lucide-react';
 import { Volunteer } from '../types';
 import {
@@ -35,6 +38,8 @@ export const ExcelUploadModal: React.FC<Props> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [importResult, setImportResult] = useState<ExcelImportResult | null>(null);
   const [importMode, setImportMode] = useState<'append' | 'replace'>('append');
+  const [customPassphrase, setCustomPassphrase] = useState('');
+  const [showPassphraseInput, setShowPassphraseInput] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
@@ -49,24 +54,35 @@ export const ExcelUploadModal: React.FC<Props> = ({
     }
   };
 
-  const processFile = async (file: File) => {
-    const validExtensions = ['.xlsx', '.xls', '.csv'];
+  const processFile = async (file: File, passphraseToUse?: string) => {
+    const validExtensions = ['.xlsx', '.xls', '.csv', '.ulepenc', '.enc'];
     const lowerName = file.name.toLowerCase();
     const isValid = validExtensions.some((ext) => lowerName.endsWith(ext));
 
     if (!isValid) {
-      alert('Por favor seleccione un archivo válido de Excel (.xlsx, .xls) o CSV (.csv).');
+      alert(
+        'Por favor seleccione un archivo válido de Excel (.xlsx, .xls), CSV (.csv) o Archivo Encriptado ULEP (.ulepenc).'
+      );
       return;
+    }
+
+    const isEncrypted = lowerName.endsWith('.ulepenc') || lowerName.endsWith('.enc');
+    if (isEncrypted && !passphraseToUse && customPassphrase) {
+      passphraseToUse = customPassphrase;
     }
 
     setSelectedFile(file);
     setIsLoading(true);
     try {
-      const result = await parseVolunteersFromExcel(file, existingVolunteers);
+      const result = await parseVolunteersFromExcel(
+        file,
+        existingVolunteers,
+        passphraseToUse || (customPassphrase ? customPassphrase : undefined)
+      );
       setImportResult(result);
     } catch (err) {
       console.error(err);
-      alert('Ocurrió un error al procesar el archivo Excel.');
+      alert('Ocurrió un error al procesar el archivo.');
     } finally {
       setIsLoading(false);
     }
@@ -87,6 +103,12 @@ export const ExcelUploadModal: React.FC<Props> = ({
     }
   };
 
+  const handleRetryWithPassphrase = () => {
+    if (selectedFile) {
+      processFile(selectedFile, customPassphrase);
+    }
+  };
+
   const handleConfirm = () => {
     if (!importResult || importResult.volunteers.length === 0) return;
     onImport(importResult.volunteers, importMode);
@@ -97,6 +119,8 @@ export const ExcelUploadModal: React.FC<Props> = ({
   const handleReset = () => {
     setSelectedFile(null);
     setImportResult(null);
+    setCustomPassphrase('');
+    setShowPassphraseInput(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -173,7 +197,7 @@ export const ExcelUploadModal: React.FC<Props> = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".xlsx, .xls, .csv"
+                accept=".xlsx, .xls, .csv, .ulepenc, .enc"
                 onChange={handleFileChange}
                 className="hidden"
               />
@@ -184,38 +208,109 @@ export const ExcelUploadModal: React.FC<Props> = ({
                 Arrastra tu archivo aquí o haz clic para seleccionarlo
               </h4>
               <p className="text-xs text-slate-500 mb-4 max-w-md mx-auto">
-                Formatos compatibles: Microsoft Excel (.xlsx, .xls) o archivo separado por comas (.csv).
+                Formatos compatibles: Microsoft Excel (.xlsx, .xls), CSV (.csv) o <strong>Archivos Encriptados ULEP (.ulepenc)</strong> protegidos con AES-256.
               </p>
-              <span className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-700/20 transition-all">
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>Explorar en mi equipo</span>
-              </span>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <span className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-700/20 transition-all">
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Explorar archivos</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-semibold rounded-xl">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Bóveda Encriptada ULEP (.ulepenc)</span>
+                </span>
+              </div>
             </div>
           ) : (
             /* Selected File / Parsing Result Preview */
             <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-2xl gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-emerald-600 text-white rounded-xl">
-                    <FileSpreadsheet className="w-5 h-5" />
+                  <div className={`p-2.5 rounded-xl text-white ${selectedFile.name.toLowerCase().endsWith('.ulepenc') ? 'bg-emerald-700' : 'bg-blue-600'}`}>
+                    {selectedFile.name.toLowerCase().endsWith('.ulepenc') ? (
+                      <Lock className="w-5 h-5" />
+                    ) : (
+                      <FileSpreadsheet className="w-5 h-5" />
+                    )}
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-slate-900 truncate max-w-sm sm:max-w-md">
-                      {selectedFile.name}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-bold text-slate-900 truncate max-w-xs sm:max-w-md">
+                        {selectedFile.name}
+                      </p>
+                      {selectedFile.name.toLowerCase().endsWith('.ulepenc') && (
+                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 text-[10px] font-bold rounded-md flex items-center gap-1">
+                          <ShieldCheck className="w-3 h-3 text-emerald-700" />
+                          AES-256
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-500">
                       {(selectedFile.size / 1024).toFixed(1)} KB
+                      {importResult?.originalFilename && importResult.originalFilename !== selectedFile.name && (
+                        <span className="ml-2 text-slate-700 font-medium">
+                          (Origen: {importResult.originalFilename})
+                        </span>
+                      )}
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="text-xs font-semibold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-1.5 rounded-xl cursor-pointer transition-all"
-                >
-                  Cambiar archivo
-                </button>
+                <div className="flex items-center gap-2 self-end sm:self-auto">
+                  {selectedFile.name.toLowerCase().endsWith('.ulepenc') && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPassphraseInput(!showPassphraseInput)}
+                      className="text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white border border-slate-300 px-3 py-1.5 rounded-xl cursor-pointer flex items-center gap-1.5 transition-all"
+                    >
+                      <Key className="w-3.5 h-3.5 text-slate-600" />
+                      <span>Clave personalizada</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleReset}
+                    className="text-xs font-semibold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-1.5 rounded-xl cursor-pointer transition-all"
+                  >
+                    Cambiar archivo
+                  </button>
+                </div>
               </div>
+
+              {/* Custom passphrase input if file requires it */}
+              {showPassphraseInput && (
+                <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex flex-col sm:flex-row gap-3 items-center">
+                  <div className="flex-1 w-full">
+                    <label className="block text-xs font-bold text-emerald-950 mb-1">
+                      Contraseña / Clave de Cifrado (opcional si usa la clave predeterminada ULEP):
+                    </label>
+                    <input
+                      type="password"
+                      value={customPassphrase}
+                      onChange={(e) => setCustomPassphrase(e.target.value)}
+                      placeholder="Ingrese clave de descifrado..."
+                      className="w-full text-xs px-3 py-2 bg-white border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-hidden"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRetryWithPassphrase}
+                    className="w-full sm:w-auto px-4 py-2 bg-emerald-700 text-white text-xs font-bold rounded-xl hover:bg-emerald-800 transition-all self-end"
+                  >
+                    Reintentar Descifrado
+                  </button>
+                </div>
+              )}
+
+              {/* Cryptographic SHA-256 integrity seal badge */}
+              {importResult?.sha256 && (
+                <div className="flex items-center gap-2 p-3 bg-slate-900 text-emerald-300 rounded-2xl text-xs font-mono">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <div className="truncate">
+                    <span className="text-slate-400 font-sans font-semibold mr-2">Sello SHA-256 de Integridad:</span>
+                    <span className="text-emerald-300">{importResult.sha256}</span>
+                  </div>
+                </div>
+              )}
 
               {isLoading ? (
                 <div className="py-12 flex flex-col items-center justify-center text-slate-600 space-y-2">

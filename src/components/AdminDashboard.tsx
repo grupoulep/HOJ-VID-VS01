@@ -3,7 +3,12 @@ import { Volunteer } from '../types';
 import { VolunteerModal } from './VolunteerModal';
 import { ExperienceCertificate } from './ExperienceCertificate';
 import { ExcelUploadModal } from './ExcelUploadModal';
-import { downloadExcelTemplate, exportVolunteersToExcel } from '../utils/excelUtils';
+import { SecurityVaultModal } from './SecurityVaultModal';
+import {
+  downloadExcelTemplate,
+  exportVolunteersToExcel,
+  exportEncryptedVolunteersFile,
+} from '../utils/excelUtils';
 import {
   saveVolunteerToFirebase,
   deleteVolunteerFromFirebase,
@@ -31,6 +36,8 @@ import {
   FileDown,
   CheckCircle2,
   Cloud,
+  Lock,
+  Database,
 } from 'lucide-react';
 
 interface Props {
@@ -49,6 +56,7 @@ export const AdminDashboard: React.FC<Props> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isVaultModalOpen, setIsVaultModalOpen] = useState(false);
   const [editingVolunteer, setEditingVolunteer] = useState<Volunteer | null>(null);
   const [viewingCertVolunteer, setViewingCertVolunteer] = useState<Volunteer | null>(null);
   const [viewingProfileVolunteer, setViewingProfileVolunteer] = useState<Volunteer | null>(null);
@@ -59,6 +67,16 @@ export const AdminDashboard: React.FC<Props> = ({
     setTimeout(() => {
       setToastMessage(null);
     }, 4500);
+  };
+
+  const handleDownloadEncryptedFile = async () => {
+    try {
+      const { filename } = await exportEncryptedVolunteersFile(volunteers);
+      showToast(`Archivo encriptado con AES-256 generado: ${filename}`);
+    } catch (err) {
+      console.error(err);
+      alert('Error al generar archivo encriptado.');
+    }
   };
 
   const filteredVolunteers = volunteers.filter((vol) => {
@@ -185,7 +203,7 @@ export const AdminDashboard: React.FC<Props> = ({
             <div
               title={
                 isFirebaseConnected
-                  ? 'Base de datos en la nube Google Firebase Firestore activa y sincronizada en tiempo real'
+                  ? 'Base de datos en la nube Google Firebase Firestore protegida con cifrado AES-256-GCM y sincronizada'
                   : 'Conectando con Google Firebase...'
               }
               className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
@@ -196,7 +214,7 @@ export const AdminDashboard: React.FC<Props> = ({
             >
               <Cloud className={`w-4 h-4 ${isFirebaseConnected ? 'text-emerald-600' : 'text-amber-600'}`} />
               <span className="hidden sm:inline">
-                {isFirebaseConnected ? 'Google Firebase Conectado' : 'Conectando Firebase...'}
+                {isFirebaseConnected ? 'Google Firebase Cifrado' : 'Conectando Firebase...'}
               </span>
               <span
                 className={`w-2 h-2 rounded-full ${
@@ -204,6 +222,20 @@ export const AdminDashboard: React.FC<Props> = ({
                 }`}
               />
             </div>
+
+            {/* Bóveda y Cifrado de Archivos */}
+            <button
+              type="button"
+              onClick={() => setIsVaultModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-950 bg-emerald-50 hover:bg-emerald-100/90 border border-emerald-300/90 rounded-xl transition-all cursor-pointer shadow-2xs"
+              title="Centro de Cifrado de Archivos y Seguridad de Datos ULEP"
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-700" />
+              <span className="hidden md:inline">Bóveda Criptográfica</span>
+              <span className="px-1.5 py-0.2 bg-emerald-200 text-emerald-900 text-[10px] font-mono rounded">
+                AES-256
+              </span>
+            </button>
 
             <button
               type="button"
@@ -258,15 +290,26 @@ export const AdminDashboard: React.FC<Props> = ({
                 <span>Cargar Masivamente</span>
               </button>
 
-              {/* Botón 3: Descargar Archivos Subidos */}
+              {/* Botón 3: Descargar Archivos Subidos (Excel Estándar) */}
               <button
                 type="button"
                 onClick={() => exportVolunteersToExcel(volunteers)}
-                title="Descargar en Excel todos los colaboradores y archivos registrados actualmente"
+                title="Descargar en Excel todos los colaboradores y archivos registrados actualmente (.xlsx)"
                 className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-sky-50 hover:bg-sky-100/90 text-blue-950 border border-sky-300 text-xs sm:text-sm font-bold rounded-2xl shadow-2xs hover:shadow-xs transition-all cursor-pointer"
               >
                 <FileDown className="w-4 h-4 text-sky-800" />
-                <span>Descargar Subidos ({volunteers.length})</span>
+                <span>Excel (.xlsx)</span>
+              </button>
+
+              {/* Botón 4: Descargar Archivo Seguro Cifrado (.ulepenc) */}
+              <button
+                type="button"
+                onClick={handleDownloadEncryptedFile}
+                title="Descargar archivo blindado con cifrado militar AES-256 (.ulepenc)"
+                className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs sm:text-sm font-bold rounded-2xl shadow-md shadow-emerald-800/20 transition-all cursor-pointer"
+              >
+                <Lock className="w-4 h-4 text-emerald-200" />
+                <span>Excel Seguro (.ulepenc)</span>
               </button>
 
               {/* Botón Adicional: Registrar Individual */}
@@ -587,6 +630,14 @@ export const AdminDashboard: React.FC<Props> = ({
         onClose={() => setIsUploadModalOpen(false)}
         existingVolunteers={volunteers}
         onImport={handleBatchImport}
+      />
+
+      {/* Security and Universal File Vault Modal */}
+      <SecurityVaultModal
+        isOpen={isVaultModalOpen}
+        onClose={() => setIsVaultModalOpen(false)}
+        volunteers={volunteers}
+        isFirebaseConnected={isFirebaseConnected}
       />
     </div>
   );

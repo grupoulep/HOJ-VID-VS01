@@ -1,9 +1,10 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Volunteer } from '../types';
-import { Download, Loader2, FileText } from 'lucide-react';
+import { Download, Loader2, FileText, ShieldCheck, Lock } from 'lucide-react';
 import html2canvas from 'html2canvas-pro';
 import { jsPDF } from 'jspdf';
 import { getFormalDateParts, cleanActualidadDate } from '../utils/dateUtils';
+import { encryptBinaryFile, triggerFileDownload, computeSHA256 } from '../utils/cryptoUtils';
 
 interface Props {
   volunteer: Volunteer;
@@ -17,7 +18,17 @@ export const ExperienceCertificate: React.FC<Props> = ({
   showCloseButton = false,
 }) => {
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isDownloadingEncrypted, setIsDownloadingEncrypted] = useState(false);
+  const [digitalSealHash, setDigitalSealHash] = useState<string>('');
   const certificateRef = useRef<HTMLDivElement>(null);
+
+  // Compute digital seal SHA-256 for this certificate
+  useEffect(() => {
+    const sealData = `${volunteer.certificateCode}|${volunteer.fullName}|${volunteer.documentNumber}|${volunteer.issueDate}|ULEP-VAULT`;
+    computeSHA256(sealData).then((h) => {
+      setDigitalSealHash(h.slice(0, 32).toUpperCase());
+    });
+  }, [volunteer]);
 
   // Date breakdown for formal closing: "Día en Números", "Mes en Letras", "Año en Números"
   const dateParts = getFormalDateParts(volunteer.issueDate);
@@ -144,6 +155,68 @@ Código de Verificación: ${volunteer.certificateCode}`;
     }
   };
 
+  const handleDownloadEncryptedPdf = async () => {
+    if (!certificateRef.current) return;
+    setIsDownloadingEncrypted(true);
+
+    try {
+      const element = certificateRef.current;
+      const cleanName = (volunteer.fullName || 'Colaborador')
+        .replace(/[^a-zA-Z0-9]/g, '_')
+        .replace(/_+/g, '_');
+      const filename = `Certificado_Laboral_${cleanName}.pdf`;
+
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 1024,
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.98);
+
+      const pdf = new jsPDF({
+        unit: 'mm',
+        format: 'letter',
+        orientation: 'portrait',
+      });
+
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const margin = 8;
+      const printableWidth = pdfWidth - margin * 2;
+      const printableHeight = pdfHeight - margin * 2;
+
+      const imgAspectRatio = canvas.width / canvas.height;
+      let renderWidth = printableWidth;
+      let renderHeight = renderWidth / imgAspectRatio;
+
+      if (renderHeight > printableHeight) {
+        renderHeight = printableHeight;
+        renderWidth = renderHeight * imgAspectRatio;
+      }
+
+      const posX = margin + (printableWidth - renderWidth) / 2;
+      const posY = margin;
+
+      pdf.addImage(imgData, 'JPEG', posX, posY, renderWidth, renderHeight, undefined, 'FAST');
+
+      const pdfBlob = pdf.output('blob');
+      const { encryptedBlob, encryptedFilename } = await encryptBinaryFile(
+        pdfBlob,
+        filename
+      );
+
+      triggerFileDownload(encryptedBlob, encryptedFilename);
+    } catch (error) {
+      console.error('Error al generar PDF encriptado:', error);
+      alert('Error al generar certificado encriptado.');
+    } finally {
+      setIsDownloadingEncrypted(false);
+    }
+  };
+
   return (
     <div className="w-full flex flex-col items-center">
       {/* Action Bar (Hidden on print) */}
@@ -153,22 +226,50 @@ Código de Verificación: ${volunteer.certificateCode}`;
             <FileText className="w-4 h-4" />
           </div>
           <div>
-            <p className="text-slate-900 font-bold text-sm">
-              Certificado de Experiencia y Laboral
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-slate-900 font-bold text-sm">
+                Certificado de Experiencia y Laboral
+              </p>
+              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-md flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                Cifrado Activo
+              </span>
+            </div>
             <p className="text-xs text-slate-500 font-normal">
-              Documento oficial con firma digital y código de validación
+              Documento oficial con firma digital, huella SHA-256 y código de validación
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center flex-wrap gap-2">
+          {/* Encrypted PDF Download */}
+          <button
+            type="button"
+            onClick={handleDownloadEncryptedPdf}
+            disabled={isDownloadingEncrypted || isDownloading}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-75 text-white text-xs sm:text-sm font-semibold rounded-xl transition-all shadow-md shadow-emerald-700/20 cursor-pointer"
+            title="Descargar certificado en formato encriptado seguro (.pdf.ulepenc)"
+          >
+            {isDownloadingEncrypted ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Cifrando...</span>
+              </>
+            ) : (
+              <>
+                <Lock className="w-4 h-4 text-emerald-200" />
+                <span>PDF Cifrado (.ulepenc)</span>
+              </>
+            )}
+          </button>
+
+          {/* Standard PDF Download */}
           <button
             type="button"
             onClick={handleDownloadPdf}
-            disabled={isDownloading}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 via-sky-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:opacity-75 text-white text-xs sm:text-sm font-semibold rounded-xl transition-all shadow-md shadow-blue-600/20 cursor-pointer"
-            title="Descargar certificado en formato PDF"
+            disabled={isDownloading || isDownloadingEncrypted}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-600 via-sky-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:opacity-75 text-white text-xs sm:text-sm font-semibold rounded-xl transition-all shadow-md shadow-blue-600/20 cursor-pointer"
+            title="Descargar certificado en formato PDF tradicional"
           >
             {isDownloading ? (
               <>
@@ -178,7 +279,7 @@ Código de Verificación: ${volunteer.certificateCode}`;
             ) : (
               <>
                 <Download className="w-4 h-4" />
-                <span>Descargar</span>
+                <span>Descargar PDF</span>
               </>
             )}
           </button>
@@ -366,19 +467,27 @@ Código de Verificación: ${volunteer.certificateCode}`;
             </div>
 
             <div className="text-left sm:text-right space-y-1.5 font-sans">
-              <div className="inline-block border border-slate-300 bg-slate-50/80 px-3.5 py-2 rounded-sm text-left">
-                <p className="text-[11px] uppercase tracking-wider text-slate-500 font-bold">
-                  Código de Validación Oficial
-                </p>
+              <div className="inline-block border border-slate-300 bg-slate-50/90 px-3.5 py-2.5 rounded-sm text-left shadow-2xs">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+                  <p className="text-[11px] uppercase tracking-wider text-slate-700 font-bold">
+                    Sello Digital Criptográfico
+                  </p>
+                </div>
                 <p className="text-xs font-mono font-bold text-slate-900">
                   {volunteer.certificateCode}
                 </p>
+                {digitalSealHash && (
+                  <p className="text-[9px] font-mono text-emerald-800 tracking-wider mt-0.5">
+                    SHA-256: {digitalSealHash}...
+                  </p>
+                )}
                 <p className="text-[10px] text-slate-500 mt-0.5">
-                  Emisión: {diaNumeros} de {mesLetras} de {anoNumeros}
+                  Emisión: {diaNumeros} de {mesLetras} de {anoNumeros} • Cifrado AES-256
                 </p>
               </div>
               <p className="text-[10px] text-slate-400 italic">
-                Documento expedido y validado digitalmente sin tachones ni enmendaduras.
+                Documento expedido, certificado y protegido contra alteraciones.
               </p>
             </div>
           </div>

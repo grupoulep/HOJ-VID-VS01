@@ -1,6 +1,12 @@
 import * as XLSX from 'xlsx';
 import { Volunteer } from '../types';
 import { generateNextSequentialCode } from './codeGenerator';
+import {
+  encryptBinaryFile,
+  decryptBinaryFile,
+  triggerFileDownload,
+  computeSHA256,
+} from './cryptoUtils';
 
 export function cleanActualidadDate(dateStr?: string): string {
   if (!dateStr || dateStr.trim().toLowerCase().includes('actualidad')) {
@@ -15,6 +21,9 @@ export interface ExcelImportResult {
   totalRows: number;
   validRows: number;
   errors: string[];
+  isEncrypted?: boolean;
+  sha256?: string;
+  originalFilename?: string;
 }
 
 // Canonical column headers for Excel templates and exports
@@ -185,6 +194,76 @@ export function exportVolunteersToExcel(volunteers: Volunteer[]): void {
 }
 
 /**
+ * Exports all registered volunteers to an encrypted AES-256-GCM file (.ulepenc) with SHA-256 integrity seal.
+ */
+export async function exportEncryptedVolunteersFile(
+  volunteers: Volunteer[],
+  passphrase?: string
+): Promise<{ filename: string; sha256: string }> {
+  const exportData = volunteers.map((vol) => ({
+    'Código Certificado': vol.certificateCode || '',
+    'Nombre Completo': vol.fullName,
+    'Tipo Documento': vol.documentType || 'Cédula de Ciudadanía',
+    'Número Documento': vol.documentNumber,
+    'Ciudad Expedición Doc': vol.documentExpeditionCity || vol.city,
+    'Fecha Nacimiento': vol.birthDate || '',
+    'Edad': vol.age,
+    'Género': vol.gender || '',
+    'Carrera o Profesión': vol.career,
+    'Teléfono': vol.phone || '',
+    'Correo Electrónico': vol.email,
+    'Ciudad Ubicación': vol.city,
+    'Periodo Desde': vol.startDate,
+    'Periodo Hasta': cleanActualidadDate(vol.endDate),
+    'Cargo Desempeñado': vol.roleTitle,
+    'Tipo Contrato': vol.contractType || 'Contrato a Término Indefinido',
+    'Funciones Principales': vol.duties || '',
+    'Horas Concluidas': vol.hoursCompleted ?? 0,
+    'Estado': vol.status,
+    'Talla Camisa': vol.shirtSize || 'M',
+    'Talla Pantalón': vol.pantsSize || '30',
+    'Talla Calzado': vol.shoeSize || '38',
+    'Estatura': vol.height || '1.68 m',
+    'Peso': vol.weight || '62 kg',
+    'RH Sangre': vol.bloodType || 'O+',
+    'EPS Salud': vol.epsHealth || 'Nueva EPS',
+    'Contacto Emergencia': vol.emergencyContactName || '',
+    'Teléfono Emergencia': vol.emergencyContactPhone || '',
+    'Ciudad Expedición Certificado': vol.issueCity || vol.city,
+    'Fecha Expedición Certificado': vol.issueDate || '',
+    'Representante Legal': vol.signatoryName || 'JERSON STIVE LOPEZ RENGIFO',
+    'Cargo Representante': vol.signatoryRole || 'Gerente y Representante Legal',
+    'Documento Representante': vol.signatoryDocument || 'C.C. 1.059.357.889 de Popayán (Cauca)',
+    'Entidad Certificadora': vol.signatoryEntity || 'FUNDACIÓN ULEP',
+    'Usuario Acceso': vol.username,
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(exportData);
+  worksheet['!cols'] = Object.keys(exportData[0] || {}).map(() => ({ wch: 22 }));
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Colaboradores_Registrados');
+
+  const excelArrayBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+  const excelBlob = new Blob([excelArrayBuffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const baseFilename = `Colaboradores_Registrados_ULEP_${todayStr}.xlsx`;
+
+  const { encryptedBlob, encryptedFilename, sha256 } = await encryptBinaryFile(
+    excelBlob,
+    baseFilename,
+    passphrase
+  );
+
+  triggerFileDownload(encryptedBlob, encryptedFilename);
+
+  return { filename: encryptedFilename, sha256 };
+}
+
+/**
  * Normalizes an object's keys to lowercase alphanumeric tokens for flexible mapping.
  */
 function normalizeKey(str: string): string {
@@ -196,49 +275,87 @@ function normalizeKey(str: string): string {
 }
 
 /**
- * Reads and parses an uploaded Excel (.xlsx, .xls) or CSV file into Volunteer objects.
+ * Reads and parses an uploaded Excel (.xlsx, .xls), CSV or encrypted (.ulepenc) file into Volunteer objects.
  */
 export async function parseVolunteersFromExcel(
   file: File,
-  existingVolunteers: Volunteer[]
+  existingVolunteers: Volunteer[],
+  customPassphrase?: string
 ): Promise<ExcelImportResult> {
+  let targetBuffer: ArrayBuffer;
+  let isEncrypted = false;
+  let fileSha256 = '';
+  let originalFilename = file.name;
+
+  try {
+    const isEncryptedFile =
+      file.name.toLowerCase().endsWith('.ulepenc') ||
+      file.name.toLowerCase().endsWith('.enc');
+
+    if (isEncryptedFile) {
+      isEncrypted = true;
+      const decrypted = await decryptBinaryFile(file, customPassphrase);
+      targetBuffer = await decrypted.decryptedBlob.arrayBuffer();
+      fileSha256 = decrypted.sha256;
+      originalFilename = decrypted.originalFilename;
+    } else {
+      targetBuffer = await file.arrayBuffer();
+      fileSha256 = await computeSHA256(targetBuffer);
+    }
+  } catch (err: unknown) {
+    const msg =
+      err instanceof Error
+        ? err.message
+        : 'Error al desencriptar el archivo. Verifique la clave de seguridad.';
+    return {
+      success: false,
+      volunteers: [],
+      totalRows: 0,
+      validRows: 0,
+      errors: [msg],
+      isEncrypted: true,
+    };
+  }
+
   return new Promise((resolve) => {
-    const reader = new FileReader();
+    try {
+      const workbook = XLSX.read(targetBuffer, { type: 'array' });
 
-    reader.onload = (e) => {
-      try {
-        const buffer = e.target?.result as ArrayBuffer;
-        const workbook = XLSX.read(buffer, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) {
+        resolve({
+          success: false,
+          volunteers: [],
+          totalRows: 0,
+          validRows: 0,
+          errors: ['El archivo no contiene ninguna hoja de cálculo válida.'],
+          isEncrypted,
+          sha256: fileSha256,
+          originalFilename,
+        });
+        return;
+      }
 
-        const firstSheetName = workbook.SheetNames[0];
-        if (!firstSheetName) {
-          resolve({
-            success: false,
-            volunteers: [],
-            totalRows: 0,
-            validRows: 0,
-            errors: ['El archivo no contiene ninguna hoja de cálculo.'],
-          });
-          return;
-        }
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rawJson = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' });
 
-        const worksheet = workbook.Sheets[firstSheetName];
-        const rawJson = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '' });
+      if (!rawJson || rawJson.length === 0) {
+        resolve({
+          success: false,
+          volunteers: [],
+          totalRows: 0,
+          validRows: 0,
+          errors: ['La hoja de cálculo está vacía o no contiene registros.'],
+          isEncrypted,
+          sha256: fileSha256,
+          originalFilename,
+        });
+        return;
+      }
 
-        if (!rawJson || rawJson.length === 0) {
-          resolve({
-            success: false,
-            volunteers: [],
-            totalRows: 0,
-            validRows: 0,
-            errors: ['El archivo está vacío o no tiene filas de datos.'],
-          });
-          return;
-        }
-
-        const errors: string[] = [];
-        const parsedVolunteers: Volunteer[] = [];
-        const cumulativeVolunteers = [...existingVolunteers];
+      const errors: string[] = [];
+      const parsedVolunteers: Volunteer[] = [];
+      const cumulativeVolunteers = [...existingVolunteers];
 
         rawJson.forEach((rawRow, index) => {
           const rowNum = index + 2; // Row 1 is header
@@ -389,6 +506,9 @@ export async function parseVolunteersFromExcel(
           totalRows: rawJson.length,
           validRows: parsedVolunteers.length,
           errors,
+          isEncrypted,
+          sha256: fileSha256,
+          originalFilename,
         });
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : 'Error al procesar el archivo Excel.';
@@ -398,20 +518,10 @@ export async function parseVolunteersFromExcel(
           totalRows: 0,
           validRows: 0,
           errors: [errorMsg],
+          isEncrypted,
+          sha256: fileSha256,
+          originalFilename,
         });
       }
-    };
-
-    reader.onerror = () => {
-      resolve({
-        success: false,
-        volunteers: [],
-        totalRows: 0,
-        validRows: 0,
-        errors: ['Error al leer el archivo desde el dispositivo.'],
-      });
-    };
-
-    reader.readAsArrayBuffer(file);
   });
 }

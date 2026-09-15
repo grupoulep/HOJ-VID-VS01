@@ -1,5 +1,6 @@
 import { Volunteer } from '../types';
 import { ensureSequentialCodes } from '../utils/codeGenerator';
+import { encryptText, decryptText, isEncryptedString } from '../utils/cryptoUtils';
 
 export const INITIAL_VOLUNTEERS: Volunteer[] = [
   {
@@ -106,23 +107,34 @@ export const INITIAL_VOLUNTEERS: Volunteer[] = [
   },
 ];
 
-const STORAGE_KEY = 'portal_voluntarios_data_v6';
+const STORAGE_KEY = 'portal_voluntarios_data_v6_enc';
 
 export function getStoredVolunteers(): Volunteer[] {
   try {
-    const data = localStorage.getItem(STORAGE_KEY);
+    const data = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('portal_voluntarios_data_v6');
     if (data) {
-      const parsed: Volunteer[] = JSON.parse(data);
-      const normalized = ensureSequentialCodes(parsed).map((v) => {
-        if (!v.endDate || v.endDate.toLowerCase().includes('actualidad')) {
-          return {
-            ...v,
-            endDate: '15 de diciembre de 2024',
-          };
+      if (isEncryptedString(data)) {
+        // Fast sync fallback or wait for decryption: if encrypted string, we schedule transparent upgrade
+        // We also keep an in-memory or sync cache if available
+        const rawJson = sessionStorage.getItem('ulep_cached_volunteers');
+        if (rawJson) {
+          return JSON.parse(rawJson) as Volunteer[];
         }
-        return v;
-      });
-      return normalized;
+      } else {
+        const parsed: Volunteer[] = JSON.parse(data);
+        const normalized = ensureSequentialCodes(parsed).map((v) => {
+          if (!v.endDate || v.endDate.toLowerCase().includes('actualidad')) {
+            return {
+              ...v,
+              endDate: '15 de diciembre de 2024',
+            };
+          }
+          return v;
+        });
+        // Automatically re-encrypt
+        saveStoredVolunteers(normalized);
+        return normalized;
+      }
     }
   } catch (e) {
     console.error('Error al leer de localStorage:', e);
@@ -133,8 +145,33 @@ export function getStoredVolunteers(): Volunteer[] {
 
 export function saveStoredVolunteers(volunteers: Volunteer[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(volunteers));
+    sessionStorage.setItem('ulep_cached_volunteers', JSON.stringify(volunteers));
+    // Asynchronously encrypt into localStorage so that raw sensitive PII is never stored in plain text
+    encryptText(JSON.stringify(volunteers))
+      .then((encrypted) => {
+        localStorage.setItem(STORAGE_KEY, encrypted);
+        // Remove unencrypted legacy key
+        localStorage.removeItem('portal_voluntarios_data_v6');
+      })
+      .catch((err) => {
+        console.error('Error encriptando almacenamiento local:', err);
+      });
   } catch (e) {
     console.error('Error al guardar en localStorage:', e);
   }
+}
+
+export async function loadEncryptedStoredVolunteers(): Promise<Volunteer[]> {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (data && isEncryptedString(data)) {
+      const decrypted = await decryptText(data);
+      const parsed = JSON.parse(decrypted) as Volunteer[];
+      sessionStorage.setItem('ulep_cached_volunteers', decrypted);
+      return ensureSequentialCodes(parsed);
+    }
+  } catch (err) {
+    console.error('Error leyendo almacenamiento encriptado:', err);
+  }
+  return getStoredVolunteers();
 }

@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfigData from '../../firebase-applet-config.json';
 import { Volunteer } from '../types';
+import { encryptText, decryptText, computeSHA256 } from '../utils/cryptoUtils';
 
 export const firebaseConfig = {
   projectId: firebaseConfigData.projectId || 'fluted-graph-72ts5',
@@ -37,6 +38,42 @@ export const db: Firestore = firebaseConfig.firestoreDatabaseId
 const VOLUNTEERS_COLLECTION = 'volunteers';
 
 /**
+ * Encrypts a Volunteer object into an AES-256-GCM protected Firestore document
+ */
+export async function volunteerToEncryptedDoc(volunteer: Volunteer): Promise<Record<string, unknown>> {
+  const json = JSON.stringify(volunteer);
+  const encryptedPayload = await encryptText(json);
+  const hash = await computeSHA256(json);
+
+  return {
+    id: volunteer.id,
+    certificateCode: volunteer.certificateCode || '',
+    _encrypted: true,
+    _algorithm: 'AES-256-GCM',
+    _encryptedAt: new Date().toISOString(),
+    _sha256: hash,
+    payload: encryptedPayload,
+  };
+}
+
+/**
+ * Decrypts a Firestore document back into a strongly typed Volunteer
+ */
+export async function encryptedDocToVolunteer(raw: Record<string, unknown>): Promise<Volunteer> {
+  if (raw._encrypted && typeof raw.payload === 'string') {
+    try {
+      const decryptedJson = await decryptText(raw.payload);
+      return JSON.parse(decryptedJson) as Volunteer;
+    } catch (err) {
+      console.error('Error al desencriptar registro de Firestore:', err);
+      return raw as unknown as Volunteer;
+    }
+  }
+  // Legacy unencrypted document
+  return raw as unknown as Volunteer;
+}
+
+/**
  * Validate live connection to Google Firebase Firestore
  */
 export async function testFirebaseConnection(): Promise<boolean> {
@@ -55,7 +92,7 @@ export async function testFirebaseConnection(): Promise<boolean> {
 }
 
 /**
- * Real-time listener for all volunteers in Firestore
+ * Real-time listener for all volunteers in Firestore with transparent AES-256 decryption
  */
 export function subscribeToVolunteers(
   onData: (volunteers: Volunteer[]) => void,
@@ -64,12 +101,18 @@ export function subscribeToVolunteers(
   const colRef = collection(db, VOLUNTEERS_COLLECTION);
   return onSnapshot(
     colRef,
-    (snapshot) => {
-      const list: Volunteer[] = [];
-      snapshot.forEach((docSnap) => {
-        list.push(docSnap.data() as Volunteer);
-      });
-      onData(list);
+    async (snapshot) => {
+      try {
+        const promises: Promise<Volunteer>[] = [];
+        snapshot.forEach((docSnap) => {
+          promises.push(encryptedDocToVolunteer(docSnap.data() as Record<string, unknown>));
+        });
+        const list = await Promise.all(promises);
+        onData(list);
+      } catch (err) {
+        console.error('Error processing encrypted snapshot:', err);
+        if (onError) onError(err as Error);
+      }
     },
     (err) => {
       console.error('Firestore subscription error:', err);
@@ -79,17 +122,17 @@ export function subscribeToVolunteers(
 }
 
 /**
- * Get one-time list of volunteers from Firestore
+ * Get one-time list of volunteers from Firestore with decryption
  */
 export async function getVolunteersFromFirebase(): Promise<Volunteer[]> {
   try {
     const colRef = collection(db, VOLUNTEERS_COLLECTION);
     const snapshot = await getDocs(colRef);
-    const list: Volunteer[] = [];
+    const promises: Promise<Volunteer>[] = [];
     snapshot.forEach((docSnap) => {
-      list.push(docSnap.data() as Volunteer);
+      promises.push(encryptedDocToVolunteer(docSnap.data() as Record<string, unknown>));
     });
-    return list;
+    return await Promise.all(promises);
   } catch (err) {
     console.error('Error fetching volunteers from Firebase:', err);
     return [];
@@ -97,13 +140,12 @@ export async function getVolunteersFromFirebase(): Promise<Volunteer[]> {
 }
 
 /**
- * Save or update a single volunteer in Firestore
+ * Save or update a single volunteer in Firestore with AES-256-GCM encryption
  */
 export async function saveVolunteerToFirebase(volunteer: Volunteer): Promise<void> {
   const docRef = doc(db, VOLUNTEERS_COLLECTION, volunteer.id);
-  // Clean undefined values to prevent Firestore serialization errors
-  const cleanData = JSON.parse(JSON.stringify(volunteer));
-  await setDoc(docRef, cleanData, { merge: true });
+  const encryptedDocData = await volunteerToEncryptedDoc(volunteer);
+  await setDoc(docRef, encryptedDocData, { merge: true });
 }
 
 /**
@@ -115,14 +157,13 @@ export async function deleteVolunteerFromFirebase(volunteerId: string): Promise<
 }
 
 /**
- * Batch write multiple volunteers to Firestore (used in bulk upload / replace)
+ * Batch write multiple volunteers to Firestore with AES-256-GCM encryption
  */
 export async function batchSaveVolunteersToFirebase(
   volunteers: Volunteer[],
   replaceExisting = false
 ): Promise<void> {
   if (replaceExisting) {
-    // Delete existing documents first
     const existing = await getVolunteersFromFirebase();
     const deleteBatches: Promise<void>[] = [];
     for (let i = 0; i < existing.length; i += 400) {
@@ -136,26 +177,28 @@ export async function batchSaveVolunteersToFirebase(
     await Promise.all(deleteBatches);
   }
 
-  // Insert or update new volunteers in chunks of 400 (Firestore limit is 500 per batch)
-  for (let i = 0; i < volunteers.length; i += 400) {
+  // Encrypt all volunteers
+  const encryptedDocs = await Promise.all(volunteers.map((v) => volunteerToEncryptedDoc(v)));
+
+  // Write in chunks of 400
+  for (let i = 0; i < encryptedDocs.length; i += 400) {
     const batch = writeBatch(db);
-    const chunk = volunteers.slice(i, i + 400);
-    chunk.forEach((v) => {
-      const cleanData = JSON.parse(JSON.stringify(v));
-      batch.set(doc(db, VOLUNTEERS_COLLECTION, v.id), cleanData, { merge: true });
+    const chunk = encryptedDocs.slice(i, i + 400);
+    chunk.forEach((enc) => {
+      batch.set(doc(db, VOLUNTEERS_COLLECTION, enc.id as string), enc, { merge: true });
     });
     await batch.commit();
   }
 }
 
 /**
- * Seeds initial mock data to Firestore if the collection is empty
+ * Seeds initial mock data to Firestore with encryption if collection is empty
  */
 export async function seedInitialVolunteersIfEmpty(initialData: Volunteer[]): Promise<boolean> {
   try {
     const existing = await getVolunteersFromFirebase();
     if (existing.length === 0 && initialData.length > 0) {
-      console.log('Seeding initial volunteers into Firestore...');
+      console.log('Seeding initial volunteers with AES-256 encryption into Firestore...');
       await batchSaveVolunteersToFirebase(initialData, false);
       return true;
     }

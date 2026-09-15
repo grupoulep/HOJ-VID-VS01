@@ -6,6 +6,11 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "_encrypted": { "type": "boolean" },
+        "_algorithm": { "type": "string" },
+        "_encryptedAt": { "type": "string" },
+        "_sha256": { "type": "string" },
+        "payload": { "type": "string" },
         "username": { "type": "string" },
         "password": { "type": "string" },
         "fullName": { "type": "string" },
