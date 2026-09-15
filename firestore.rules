@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Permite lectura y escritura de la colección de voluntarios y certificados
+    match /volunteers/{volunteerId} {
+      allow read, write: if true;
+    }
+    
+    // Conexión de prueba y salud de Firestore
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "entities": {
+    "Volunteer": {
+      "title": "Volunteer",
+      "description": "Colaborador, voluntario o trabajador registrado en la Fundación ULEP",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "fullName": { "type": "string" },
+        "documentType": { "type": "string" },
+        "documentNumber": { "type": "string" },
+        "documentExpeditionCity": { "type": "string" },
+        "age": { "type": "number" },
+        "career": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "city": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "roleTitle": { "type": "string" },
+        "hoursCompleted": { "type": "number" },
+        "duties": { "type": "string" },
+        "contractType": { "type": "string" },
+        "issueCity": { "type": "string" },
+        "issueDate": { "type": "string" },
+        "certificateCode": { "type": "string" },
+        "status": { "type": "string", "enum": ["Activo", "Finalizado"] },
+        "signatoryName": { "type": "string" },
+        "signatoryRole": { "type": "string" },
+        "signatoryDocument": { "type": "string" },
+        "signatoryEntity": { "type": "string" },
+        "shirtSize": { "type": "string" },
+        "pantsSize": { "type": "string" },
+        "shoeSize": { "type": "string" },
+        "height": { "type": "string" },
+        "weight": { "type": "string" },
+        "bloodType": { "type": "string" },
+        "epsHealth": { "type": "string" },
+        "emergencyContactName": { "type": "string" },
+        "emergencyContactPhone": { "type": "string" },
+        "birthDate": { "type": "string" },
+        "gender": { "type": "string" }
+      },
+      "required": ["fullName", "documentNumber", "roleTitle", "certificateCode"]
+    }
+  },
+  "firestore": {
+    "/volunteers/{volunteerId}": {
+      "schema": "Volunteer",
+      "description": "Colección de colaboradores y certificados de experiencia laboral"
+    }
+  }
+}

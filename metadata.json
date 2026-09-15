@@ -1,0 +1,6 @@
+{
+  "name": "Portal de Voluntariado",
+  "description": "Portal de la FUNDACIÓN ULEP (NIT 902050377-7). Sistema de consulta, registro y emisión de certificados de experiencia y laborales en Popayán, Cauca.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
