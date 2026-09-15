@@ -285,6 +285,7 @@ export const ExcelUploadModal: React.FC<Props> = ({
                     </label>
                     <input
                       type="password"
+                      autoComplete="off"
                       value={customPassphrase}
                       onChange={(e) => setCustomPassphrase(e.target.value)}
                       placeholder="Ingrese clave de descifrado..."

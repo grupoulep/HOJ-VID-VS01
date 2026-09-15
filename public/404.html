@@ -4,11 +4,12 @@
     <meta charset="utf-8" />
     <title>Portal de Voluntariado</title>
     <script type="text/javascript">
-      // GitHub Pages SPA redirect
+      // GitHub Pages SPA redirect with HTTPS enforcement
       var pathSegmentsToKeep = 0;
       var l = window.location;
+      var protocol = (l.hostname !== 'localhost' && l.hostname !== '127.0.0.1') ? 'https:' : l.protocol;
       l.replace(
-        l.protocol +
+        protocol +
           '//' +
           l.hostname +
           (l.port ? ':' + l.port : '') +

@@ -343,6 +343,7 @@ export const SecurityVaultModal: React.FC<Props> = ({
                 </label>
                 <input
                   type="password"
+                  autoComplete="off"
                   value={encryptPassphrase}
                   onChange={(e) => setEncryptPassphrase(e.target.value)}
                   placeholder="Dejar en blanco para usar la clave institucional ULEP..."
@@ -430,6 +431,7 @@ export const SecurityVaultModal: React.FC<Props> = ({
                 </label>
                 <input
                   type="password"
+                  autoComplete="off"
                   value={decryptPassphrase}
                   onChange={(e) => setDecryptPassphrase(e.target.value)}
                   placeholder="Dejar en blanco si se utilizó la clave institucional..."

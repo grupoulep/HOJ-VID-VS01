@@ -97,6 +97,7 @@ export const LoginForm: React.FC<Props> = ({ volunteers, onLoginSuccess }) => {
                 <input
                   type="text"
                   required
+                  autoComplete="username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="Ej. admin o camila.rodriguez"
@@ -116,6 +117,7 @@ export const LoginForm: React.FC<Props> = ({ volunteers, onLoginSuccess }) => {
                 <input
                   type="password"
                   required
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"

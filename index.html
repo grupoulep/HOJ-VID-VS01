@@ -1,8 +1,26 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Seguridad y Forzado de Conexión Segura HTTPS (SSL/TLS) -->
+    <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests" />
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+    <script>
+      // Redirección forzada automática a HTTPS seguro
+      if (
+        window.location.protocol === 'http:' &&
+        window.location.hostname !== 'localhost' &&
+        window.location.hostname !== '127.0.0.1' &&
+        !window.location.hostname.endsWith('.internal')
+      ) {
+        window.location.replace('https:' + window.location.href.substring(window.location.protocol.length));
+      }
+    </script>
+
     <title>Portal de Voluntariado</title>
     <meta name="description" content="Portal de la FUNDACIÓN ULEP (NIT 902050377-7). Sistema de consulta, registro y emisión de certificados de experiencia y laborales en Popayán, Cauca." />
     <meta property="og:title" content="Portal de Voluntariado" />
